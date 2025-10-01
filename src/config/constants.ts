@@ -43,7 +43,8 @@ export const INSTAGRAM_SELECTORS = {
   PROFILE_NAME: 'header a span, a[role="link"] span',
   POST_DATE: 'time',
   IMAGES: 'img[src*="cdninstagram"]',
-  VIDEOS: 'video[poster*="cdninstagram"]',
+  VIDEOS: 'video[poster*="cdninstagram"], video[src*="blob:"]',
+  VIDEO_SOURCES: 'video[src*="blob:"], video[poster*="cdninstagram"]',
   NEXT_BUTTON: 'button[aria-label="Weiter"], button[aria-label="Next"]'
 } as const;
 

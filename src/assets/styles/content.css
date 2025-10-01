@@ -4,27 +4,86 @@
 
 /* Instagram Downloader Button Styles */
 .instagram-downloader-container {
-  @apply absolute top-2 right-2 z-[99999] flex gap-2 items-center pointer-events-auto;
+  @apply absolute top-3 right-3 z-[99999] flex gap-2 items-center pointer-events-auto;
 }
 
 .instagram-download-btn {
-  @apply w-10 h-10 rounded-full border-2 border-white cursor-pointer flex justify-center items-center text-white font-bold text-base transition-all duration-300 shadow-lg outline-none;
-  background: linear-gradient(45deg, #E4405F, #F56040);
+  @apply w-12 h-12 rounded-full border-3 border-white cursor-pointer flex justify-center items-center text-white font-bold text-lg transition-all duration-300 shadow-xl outline-none;
+  background: linear-gradient(135deg, #E4405F 0%, #F56040 50%, #E4405F 100%);
+  backdrop-filter: blur(10px);
+  position: relative;
+  overflow: hidden;
+}
+
+.instagram-download-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  transition: left 0.5s;
+}
+
+.instagram-download-btn:hover::before {
+  left: 100%;
 }
 
 .instagram-download-btn:hover {
   @apply scale-110;
-  box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+  box-shadow: 0 8px 25px rgba(228, 64, 95, 0.4);
+  transform: translateY(-2px);
 }
 
 .instagram-download-btn:active {
   @apply scale-95;
+  transform: translateY(0);
 }
 
 /* Animation für aktive Downloads */
 .instagram-download-btn.downloading {
   @apply animate-pulse;
-  background: linear-gradient(45deg, #dc2626, #b91c1c);
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 50%, #dc2626 100%);
+  box-shadow: 0 0 20px rgba(220, 38, 38, 0.6);
+}
+
+/* Pulsing Animation */
+@keyframes pulse-glow {
+  0% { box-shadow: 0 0 5px rgba(228, 64, 95, 0.5); }
+  50% { box-shadow: 0 0 20px rgba(228, 64, 95, 0.8), 0 0 30px rgba(228, 64, 95, 0.6); }
+  100% { box-shadow: 0 0 5px rgba(228, 64, 95, 0.5); }
+}
+
+.instagram-download-btn.downloading {
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+/* Button States */
+.instagram-download-btn.ready {
+  background: linear-gradient(135deg, #10b981 0%, #059669 50%, #10b981 100%);
+}
+
+.instagram-download-btn.ready:hover {
+  box-shadow: 0 8px 25px rgba(16, 185, 129, 0.4);
+}
+
+/* Icon Animation */
+.instagram-download-btn .icon {
+  transition: transform 0.3s ease;
+}
+
+.instagram-download-btn:hover .icon {
+  transform: scale(1.1);
+}
+
+.instagram-download-btn.downloading .icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* Responsive Design */

@@ -34,7 +34,42 @@ export function getPostImages(post: HTMLElement): HTMLImageElement[] {
  */
 export function getPostVideos(post: HTMLElement): HTMLVideoElement[] {
   return [...post.querySelectorAll(INSTAGRAM_SELECTORS.VIDEOS)]
-    .filter(vid => (vid as HTMLVideoElement).poster && (vid as HTMLVideoElement).poster.includes('cdninstagram')) as HTMLVideoElement[];
+    .filter(vid => {
+      const video = vid as HTMLVideoElement;
+      return (video.poster && video.poster.includes('cdninstagram')) || 
+             (video.src && video.src.startsWith('blob:'));
+    }) as HTMLVideoElement[];
+}
+
+/**
+ * Findet alle Video-Quellen (Blob-URLs und CDN-URLs)
+ */
+export function getVideoSources(post: HTMLElement): { url: string; type: 'blob' | 'cdn' }[] {
+  const videos = [...post.querySelectorAll(INSTAGRAM_SELECTORS.VIDEO_SOURCES)] as HTMLVideoElement[];
+  const sources: { url: string; type: 'blob' | 'cdn' }[] = [];
+  
+  console.log(`[DOM] Gefundene Video-Elemente: ${videos.length}`);
+  
+  videos.forEach((video, index) => {
+    console.log(`[DOM] Video ${index}:`, {
+      src: video.src,
+      poster: video.poster,
+      hasSrc: !!video.src,
+      hasPoster: !!video.poster
+    });
+    
+    if (video.src && video.src.startsWith('blob:')) {
+      console.log(`[DOM] Blob-Video gefunden: ${video.src}`);
+      sources.push({ url: video.src, type: 'blob' });
+    }
+    if (video.poster && video.poster.includes('cdninstagram')) {
+      console.log(`[DOM] CDN-Thumbnail gefunden: ${video.poster}`);
+      sources.push({ url: video.poster, type: 'cdn' });
+    }
+  });
+  
+  console.log(`[DOM] Video-Quellen gefunden: ${sources.length}`);
+  return sources;
 }
 
 /**

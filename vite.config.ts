@@ -30,8 +30,8 @@ export default defineConfig({
           dest: '.'
         },
         {
-          src: 'src/icons',
-          dest: '.'
+          src: 'src/icons/*',
+          dest: 'icons'
         },
         {
           src: 'src/assets/styles',

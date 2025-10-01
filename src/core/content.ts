@@ -1,5 +1,9 @@
 // content.ts - Content Script für Instagram
 import type { DownloadMessage, DownloadControl, DownloadStats } from '../types/index.js';
+import { getPostImages, getVideoSources, getPostVideos } from '../utils/domUtils.js';
+import { downloadBlobUrl, isBlobUrl } from '../utils/blobUtils.js';
+import { downloadVideoWithFallback } from '../utils/videoDownloadUtils.js';
+// import { generateFilename } from '../utils/filenameUtils.js';
 
 console.log('[Extension] Instagram Multi-Post Full-Res Downloader geladen');
 
@@ -72,41 +76,11 @@ class InstagramDownloader {
         });
 
         const button = document.createElement('button');
-        button.className = 'instagram-download-btn';
+        button.className = 'instagram-download-btn ready';
         button.title = 'Download starten';
-        button.innerHTML = '▶';
+        button.innerHTML = '<span class="icon">▶</span>';
         
-        // Moderne Button-Styles mit Tailwind-ähnlichem Design
-        Object.assign(button.style, {
-            width: '40px',
-            height: '40px',
-            borderRadius: '50%',
-            background: 'linear-gradient(45deg, #E4405F, #F56040)',
-            border: '2px solid white',
-            cursor: 'pointer',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            color: 'white',
-            fontWeight: 'bold',
-            fontSize: '16px',
-            transition: 'all 0.3s ease',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-            outline: 'none'
-        });
-
-        // Hover-Effekte
-        button.addEventListener('mouseenter', () => {
-            button.style.transform = 'scale(1.1)';
-            button.style.boxShadow = '0 6px 16px rgba(0,0,0,0.4)';
-        });
-
-        button.addEventListener('mouseleave', () => {
-            if (!this.activeDownloads.has(post)) {
-                button.style.transform = 'scale(1)';
-                button.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-            }
-        });
+        // Button ist bereits durch CSS gestylt
 
         container.appendChild(button);
         post.style.position = 'relative';
@@ -144,15 +118,13 @@ class InstagramDownloader {
         this.activeDownloads.delete(post);
         this.downloadStats.isRunning = false;
         
-        button.style.background = 'linear-gradient(45deg, #E4405F, #F56040)';
-        button.innerHTML = '▶';
+        button.className = 'instagram-download-btn ready';
+        button.innerHTML = '<span class="icon">▶</span>';
         button.title = 'Download starten';
         
         if (animationInterval) {
             clearInterval(animationInterval);
         }
-        button.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-        button.style.transform = 'scale(1)';
     }
 
     private async startDownload(
@@ -166,8 +138,8 @@ class InstagramDownloader {
         this.activeDownloads.set(post, control);
         this.downloadStats.isRunning = true;
         
-        button.style.background = 'linear-gradient(45deg, #dc2626, #b91c1c)';
-        button.innerHTML = '⏸';
+        button.className = 'instagram-download-btn downloading';
+        button.innerHTML = '<span class="icon">⏸</span>';
         button.title = 'Download pausieren';
         
         animationInterval = this.startPulseAnimation(button);
@@ -224,20 +196,43 @@ class InstagramDownloader {
         index: number, 
         profileName: string, 
         postDate: Date, 
-        isVideoThumbnail = false
+        isVideoThumbnail = false,
+        isVideo = false
     ): Promise<void> {
         const timestamp = Date.now();
         const formattedDate = this.formatDate(postDate);
-        const extension = 'jpg';
+        
+        // Bestimme die Dateiendung basierend auf dem Typ
+        let extension: string;
+        if (isBlobUrl(url)) {
+            extension = isVideo ? 'mp4' : 'jpg';
+        } else {
+            extension = isVideo ? 'mp4' : 'jpg';
+        }
 
         let filename: string;
         if (isVideoThumbnail) {
-            filename = `${profileName}/${profileName}_${timestamp}_${index}_${formattedDate}_thumbnail.${extension}`;
+            filename = `${profileName}_${timestamp}_${index}_${formattedDate}_thumbnail.${extension}`;
+        } else if (isVideo) {
+            filename = `${profileName}_${timestamp}_${index}_${formattedDate}_video.${extension}`;
         } else {
-            filename = `${profileName}/${profileName}_${timestamp}_${index}_${formattedDate}.${extension}`;
+            filename = `${profileName}_${timestamp}_${index}_${formattedDate}.${extension}`;
         }
 
         try {
+            // Für Blob-URLs verwende die spezielle Download-Funktion
+            if (isBlobUrl(url)) {
+                const success = await downloadBlobUrl(url, filename);
+                if (success) {
+                    console.log(`[Blob Download] Erfolgreich: ${filename}`);
+                    this.downloadStats.totalMedia++;
+                } else {
+                    console.error('[Blob Download] Fehlgeschlagen:', filename);
+                }
+                return;
+            }
+
+            // Für normale URLs verwende die Chrome Download API
             const message: DownloadMessage = {
                 action: "download",
                 url,
@@ -266,33 +261,62 @@ class InstagramDownloader {
         let foundNew = false;
 
         // 1. Bilder im Post
-        const imgs = [...post.querySelectorAll('img')]
-            .filter(img => img.src && img.src.includes('cdninstagram'));
-
+        const imgs = getPostImages(post);
         for (const img of imgs) {
             if (img.naturalHeight < 400) continue; // kleine Avatare ignorieren
             if (!seenUrls.has(img.src)) {
                 console.log("[DEBUG] Ein Bild → wird geladen:", img.src);
                 seenUrls.add(img.src);
-                await this.downloadMedia(img.src, seenUrls.size, profileName, postDate, false);
+                await this.downloadMedia(img.src, seenUrls.size, profileName, postDate, false, false);
                 console.log("[DEBUG] Bild wurde geladen.");
                 foundNew = true;
                 await new Promise(r => setTimeout(r, 300));
             }
         }
 
-        // 2. Videos im Post → nur Thumbnail (poster)
-        const videos = [...post.querySelectorAll('video')]
-            .filter(vid => vid.poster && vid.poster.includes('cdninstagram'));
-
-        for (const vid of videos) {
-            if (!seenUrls.has(vid.poster)) {
-                console.log("[DEBUG] Ein Video → Thumbnail wird geladen:", vid.poster);
-                seenUrls.add(vid.poster);
-                await this.downloadMedia(vid.poster, seenUrls.size, profileName, postDate, false);
-                console.log("[DEBUG] Thumbnail wurde geladen.");
-                foundNew = true;
-                await new Promise(r => setTimeout(r, 300));
+        // 2. Videos im Post - sowohl Blob-URLs als auch Thumbnails
+        const videoSources = getVideoSources(post);
+        const videoElements = getPostVideos(post);
+        console.log(`[DEBUG] Gefundene Video-Quellen: ${videoSources.length}`);
+        console.log(`[DEBUG] Gefundene Video-Elemente: ${videoElements.length}`);
+        
+        for (const source of videoSources) {
+            console.log(`[DEBUG] Video-Quelle: ${source.url} (${source.type})`);
+            
+            if (!seenUrls.has(source.url)) {
+                console.log(`[DEBUG] Video-Quelle → wird geladen: ${source.url} (${source.type})`);
+                seenUrls.add(source.url);
+                
+                if (source.type === 'blob') {
+                    // Blob-URL = echtes Video - verwende Fallback-Methoden
+                    console.log("[DEBUG] Starte Video-Download mit Fallback-Methoden...");
+                    
+                    const timestamp = Date.now();
+                    const formattedDate = this.formatDate(postDate);
+                    const filename = `${profileName}_${timestamp}_${seenUrls.size}_${formattedDate}_video.mp4`;
+                    
+                    // Finde das entsprechende Video-Element
+                    const videoElement = videoElements.find(vid => vid.src === source.url);
+                    
+                    const success = await downloadVideoWithFallback(videoElement || null, source.url, filename);
+                    if (success) {
+                        console.log("[DEBUG] Video wurde erfolgreich geladen.");
+                        this.downloadStats.totalMedia++;
+                        foundNew = true;
+                    } else {
+                        console.error("[DEBUG] Video-Download fehlgeschlagen.");
+                    }
+                } else {
+                    // CDN-URL = Thumbnail
+                    console.log("[DEBUG] Starte Thumbnail-Download...");
+                    await this.downloadMedia(source.url, seenUrls.size, profileName, postDate, true, false);
+                    console.log("[DEBUG] Video-Thumbnail wurde geladen.");
+                    foundNew = true;
+                }
+                
+                await new Promise(r => setTimeout(r, 500)); // Längere Pause für Videos
+            } else {
+                console.log(`[DEBUG] Video-Quelle bereits gesehen: ${source.url}`);
             }
         }
 

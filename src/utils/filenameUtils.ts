@@ -1,7 +1,7 @@
 // filenameUtils.ts - Dateiname-Utility-Funktionen
 
 import { formatDate, createTimestamp } from './dateUtils.js';
-import { FOLDER_STRUCTURES } from '../config/constants.js';
+// import { FOLDER_STRUCTURES } from '../config/constants.js';
 import type { ExtensionSettings } from '../types/index.js';
 
 /**
@@ -13,20 +13,28 @@ export function generateFilename(
   profileName: string,
   postDate: Date,
   settings: ExtensionSettings,
-  isVideoThumbnail = false
+  isVideoThumbnail = false,
+  isVideo = false
 ): string {
   const timestamp = createTimestamp();
   const formattedDate = formatDate(postDate);
   const extension = getFileExtension(url);
 
   let baseFilename: string;
+  let mediaType: 'image' | 'video' | 'thumbnail';
+  
   if (isVideoThumbnail) {
     baseFilename = `${profileName}_${timestamp}_${index}_${formattedDate}_thumbnail.${extension}`;
+    mediaType = 'thumbnail';
+  } else if (isVideo) {
+    baseFilename = `${profileName}_${timestamp}_${index}_${formattedDate}_video.${extension}`;
+    mediaType = 'video';
   } else {
     baseFilename = `${profileName}_${timestamp}_${index}_${formattedDate}.${extension}`;
+    mediaType = 'image';
   }
 
-  return createFolderStructure(baseFilename, profileName, postDate, settings);
+  return createFolderStructure(baseFilename, profileName, postDate, settings, mediaType);
 }
 
 /**
@@ -35,21 +43,29 @@ export function generateFilename(
 function createFolderStructure(
   filename: string,
   profileName: string,
-  postDate: Date,
-  settings: ExtensionSettings
+  _postDate: Date,
+  _settings: ExtensionSettings,
+  mediaType: 'image' | 'video' | 'thumbnail' = 'image'
 ): string {
-  switch (settings.folderStructure) {
-    case FOLDER_STRUCTURES.PROFILE:
-      return `${profileName}/${filename}`;
-    
-    case FOLDER_STRUCTURES.DATE:
-      const dateFolder = formatDate(postDate);
-      return `${dateFolder}/${filename}`;
-    
-    case FOLDER_STRUCTURES.FLAT:
+  // Neue Ordnerstruktur: profilname/images|videos|video_thumbnails/filename
+  const baseFolder = profileName;
+  let subFolder: string;
+  
+  switch (mediaType) {
+    case 'image':
+      subFolder = 'images';
+      break;
+    case 'video':
+      subFolder = 'videos';
+      break;
+    case 'thumbnail':
+      subFolder = 'video_thumbnails';
+      break;
     default:
-      return filename;
+      subFolder = 'images';
   }
+  
+  return `${baseFolder}/${subFolder}/${filename}`;
 }
 
 /**
