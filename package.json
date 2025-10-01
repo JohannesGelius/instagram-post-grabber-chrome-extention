@@ -1,0 +1,31 @@
+{
+  "name": "instagram-post-grabber-chrome-extension",
+  "version": "1.2.0",
+  "description": "Chrome Extension zum Downloaden von Instagram Posts mit TypeScript und Tailwind CSS",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.254",
+    "@types/node": "^20.10.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.3.6",
+    "typescript": "^5.3.2",
+    "vite": "^5.0.0",
+    "vite-plugin-static-copy": "^0.17.0"
+  },
+  "keywords": [
+    "chrome-extension",
+    "instagram",
+    "downloader",
+    "typescript",
+    "tailwind"
+  ],
+  "author": "Johannes Gelius",
+  "license": "MIT"
+}

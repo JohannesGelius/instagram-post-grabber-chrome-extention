@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom Toggle Switch */
+.toggle {
+  @apply relative inline-flex h-6 w-11 items-center rounded-full bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-pink-500 focus:ring-offset-2;
+}
+
+.toggle:checked {
+  @apply bg-pink-500;
+}
+
+.toggle:focus {
+  @apply ring-2 ring-pink-500 ring-offset-2;
+}
+
+.toggle::before {
+  @apply inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform;
+  content: '';
+}
+
+.toggle:checked::before {
+  @apply translate-x-6;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
+}
+
+/* Button Hover Effects */
+button {
+  @apply transition-all duration-200;
+}
+
+button:active {
+  @apply transform scale-95;
+}
+
+/* Input Focus */
+input:focus, select:focus {
+  @apply ring-2 ring-pink-500 ring-offset-2 border-pink-500;
+}
+
+/* Status Indicators */
+.status-ready {
+  @apply text-green-600;
+}
+
+.status-downloading {
+  @apply text-blue-600;
+}
+
+.status-error {
+  @apply text-red-600;
+}
+
+/* Animation für Status Updates */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}

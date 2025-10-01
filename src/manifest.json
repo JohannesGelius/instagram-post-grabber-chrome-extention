@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Instagram Post Grabber",
+  "version": "1.2.0",
+  "description": "Download Instagram posts with high resolution images and videos",
+  "permissions": [
+    "downloads",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "*://*.instagram.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.instagram.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Instagram Post Grabber"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
