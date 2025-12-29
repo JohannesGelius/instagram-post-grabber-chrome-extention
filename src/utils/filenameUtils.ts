@@ -1,6 +1,6 @@
 // filenameUtils.ts - Dateiname-Utility-Funktionen
 
-import { formatDate, createTimestamp } from './dateUtils.js';
+import { formatDate, createTimestamp, formatDateTimeForFolder } from './dateUtils.js';
 // import { FOLDER_STRUCTURES } from '../config/constants.js';
 import type { ExtensionSettings } from '../types/index.js';
 
@@ -37,35 +37,27 @@ export function generateFilename(
   return createFolderStructure(baseFilename, profileName, postDate, settings, mediaType);
 }
 
+// Speichere den Ordnernamen beim ersten Aufruf, damit alle Downloads im selben Ordner landen
+let folderName: string | null = null;
+
 /**
  * Erstellt die Ordnerstruktur basierend auf den Einstellungen
+ * Ein Ordner mit aktuellem Datum und Uhrzeit im deutschen Format
  */
 function createFolderStructure(
   filename: string,
-  profileName: string,
+  _profileName: string,
   _postDate: Date,
   _settings: ExtensionSettings,
-  mediaType: 'image' | 'video' | 'thumbnail' = 'image'
+  _mediaType: 'image' | 'video' | 'thumbnail' = 'image'
 ): string {
-  // Neue Ordnerstruktur: profilname/images|videos|video_thumbnails/filename
-  const baseFolder = profileName;
-  let subFolder: string;
-  
-  switch (mediaType) {
-    case 'image':
-      subFolder = 'images';
-      break;
-    case 'video':
-      subFolder = 'videos';
-      break;
-    case 'thumbnail':
-      subFolder = 'video_thumbnails';
-      break;
-    default:
-      subFolder = 'images';
+  // Erstelle Ordnername beim ersten Aufruf (aktuelles Datum und Uhrzeit)
+  if (!folderName) {
+    folderName = formatDateTimeForFolder();
   }
   
-  return `${baseFolder}/${subFolder}/${filename}`;
+  // Alle Dateien in einem Ordner: DD-MM-YYYY_HH-MM-SS/filename
+  return `${folderName}/${filename}`;
 }
 
 /**
@@ -93,6 +85,49 @@ export function sanitizeFilename(filename: string): string {
     .replace(/\s+/g, '_')           // Ersetze Leerzeichen
     .replace(/_+/g, '_')            // Entferne mehrfache Unterstriche
     .replace(/^_|_$/g, '');         // Entferne führende/nachfolgende Unterstriche
+}
+
+/**
+ * Erstellt einen Hash aus einer URL für eindeutige Dateinamen
+ */
+function createUrlHash(url: string): string {
+  // Entferne Query-Parameter für bessere Eindeutigkeit
+  const cleanUrl = url.split('?')[0];
+  let hash = 0;
+  for (let i = 0; i < cleanUrl.length; i++) {
+    const char = cleanUrl.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return Math.abs(hash).toString(36).substring(0, 8);
+}
+
+/**
+ * Erstellt einen eindeutigen Dateinamen basierend auf URL-Hash
+ */
+export function generateUniqueFilename(
+  url: string,
+  profileName: string,
+  postDate: Date,
+  settings: ExtensionSettings,
+  isVideoThumbnail = false,
+  isVideo = false
+): string {
+  const urlHash = createUrlHash(url);
+  const formattedDate = formatDate(postDate);
+  const extension = getFileExtension(url);
+  
+  let baseFilename: string;
+  
+  if (isVideoThumbnail) {
+    baseFilename = `${profileName}_${urlHash}_${formattedDate}_thumbnail.${extension}`;
+  } else if (isVideo) {
+    baseFilename = `${profileName}_${urlHash}_${formattedDate}_video.${extension}`;
+  } else {
+    baseFilename = `${profileName}_${urlHash}_${formattedDate}.${extension}`;
+  }
+  
+  return createFolderStructure(baseFilename, profileName, postDate, settings, isVideoThumbnail ? 'thumbnail' : (isVideo ? 'video' : 'image'));
 }
 
 /**

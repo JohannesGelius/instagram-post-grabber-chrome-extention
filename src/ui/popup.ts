@@ -7,7 +7,7 @@ class PopupManager {
         downloadVideos: true,
         downloadThumbnails: true,
         folderStructure: 'profile',
-        maxPosts: 50
+        maxPosts: 1000 // Erhöhtes Standard-Limit
     };
 
     constructor() {
@@ -70,7 +70,7 @@ class PopupManager {
         const maxPostsInput = document.getElementById('maxPosts') as HTMLInputElement;
         maxPostsInput.addEventListener('change', (e) => {
             const value = parseInt((e.target as HTMLInputElement).value);
-            this.settings.maxPosts = Math.max(1, Math.min(100, value));
+            this.settings.maxPosts = Math.max(1, Math.min(10000, value));
             this.saveSettings();
         });
 

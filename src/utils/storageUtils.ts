@@ -12,7 +12,7 @@ export async function loadSettings(): Promise<ExtensionSettings> {
     downloadVideos: true,
     downloadThumbnails: true,
     folderStructure: 'profile',
-    maxPosts: 50
+    maxPosts: 1000
   };
 
   try {

@@ -1,9 +1,11 @@
 // content.ts - Content Script für Instagram
-import type { DownloadMessage, DownloadControl, DownloadStats } from '../types/index.js';
+import type { DownloadMessage, DownloadControl, DownloadStats, ExtensionSettings } from '../types/index.js';
 import { getPostImages, getVideoSources, getPostVideos } from '../utils/domUtils.js';
 import { downloadBlobUrl, isBlobUrl } from '../utils/blobUtils.js';
 import { downloadVideoWithFallback } from '../utils/videoDownloadUtils.js';
-// import { generateFilename } from '../utils/filenameUtils.js';
+import { generateUniqueFilename } from '../utils/filenameUtils.js';
+import { loadSettings } from '../utils/storageUtils.js';
+import { DOWNLOAD_CONFIG } from '../config/constants.js';
 
 console.log('[Extension] Instagram Multi-Post Full-Res Downloader geladen');
 
@@ -15,14 +17,27 @@ class InstagramDownloader {
         currentPost: 0,
         isRunning: false
     };
+    private settings: ExtensionSettings = {
+        autoDownload: false,
+        downloadVideos: true,
+        downloadThumbnails: true,
+        folderStructure: 'profile',
+        maxPosts: 1000 // Erhöhtes Standard-Limit
+    };
+    private downloadedUrls = new Set<string>(); // Verhindert doppelte Downloads
 
     constructor() {
+        this.loadSettings();
         this.initializeDownloader();
+    }
+
+    private async loadSettings(): Promise<void> {
+        this.settings = await loadSettings();
     }
 
     private initializeDownloader(): void {
         // Initialisierung alle 200ms
-        setInterval(() => this.addButtons(), 200);
+        setInterval(() => this.addButtons(), DOWNLOAD_CONFIG.BUTTON_CHECK_INTERVAL);
         
         // Observer für neue Posts
         this.setupPostObserver();
@@ -171,12 +186,6 @@ class InstagramDownloader {
         }, 100);
     }
 
-    private formatDate(date: Date): string {
-        const dd = String(date.getDate()).padStart(2, '0');
-        const mm = String(date.getMonth() + 1).padStart(2, '0');
-        const yyyy = date.getFullYear();
-        return `${dd}-${mm}-${yyyy}`;
-    }
 
     private getProfileName(post: HTMLElement): string {
         const el = post.querySelector('header a span') || post.querySelector('a[role="link"] span');
@@ -193,63 +202,101 @@ class InstagramDownloader {
 
     private async downloadMedia(
         url: string, 
-        index: number, 
+        _index: number, 
         profileName: string, 
         postDate: Date, 
         isVideoThumbnail = false,
         isVideo = false
-    ): Promise<void> {
-        const timestamp = Date.now();
-        const formattedDate = this.formatDate(postDate);
-        
-        // Bestimme die Dateiendung basierend auf dem Typ
-        let extension: string;
-        if (isBlobUrl(url)) {
-            extension = isVideo ? 'mp4' : 'jpg';
-        } else {
-            extension = isVideo ? 'mp4' : 'jpg';
+    ): Promise<boolean> {
+        // Prüfe ob URL bereits heruntergeladen wurde
+        if (this.downloadedUrls.has(url)) {
+            console.log('[Download] URL bereits heruntergeladen, überspringe:', url);
+            return false;
         }
 
-        let filename: string;
-        if (isVideoThumbnail) {
-            filename = `${profileName}_${timestamp}_${index}_${formattedDate}_thumbnail.${extension}`;
-        } else if (isVideo) {
-            filename = `${profileName}_${timestamp}_${index}_${formattedDate}_video.${extension}`;
-        } else {
-            filename = `${profileName}_${timestamp}_${index}_${formattedDate}.${extension}`;
-        }
+        // Verwende generateUniqueFilename für eindeutige Dateinamen basierend auf URL-Hash
+        const filename = generateUniqueFilename(
+            url,
+            profileName,
+            postDate,
+            this.settings,
+            isVideoThumbnail,
+            isVideo
+        );
 
-        try {
-            // Für Blob-URLs verwende die spezielle Download-Funktion
-            if (isBlobUrl(url)) {
-                const success = await downloadBlobUrl(url, filename);
-                if (success) {
-                    console.log(`[Blob Download] Erfolgreich: ${filename}`);
-                    this.downloadStats.totalMedia++;
+        // Retry-Mechanismus bei Fehlern
+        let retries = 0;
+        const maxRetries = DOWNLOAD_CONFIG.MAX_RETRIES;
+
+        while (retries <= maxRetries) {
+            try {
+                let success = false;
+
+                // Für Blob-URLs verwende die spezielle Download-Funktion
+                if (isBlobUrl(url)) {
+                    success = await downloadBlobUrl(url, filename);
+                    if (success) {
+                        console.log(`[Blob Download] Erfolgreich: ${filename}`);
+                        this.downloadedUrls.add(url);
+                        this.downloadStats.totalMedia++;
+                        return true;
+                    } else {
+                        console.warn(`[Blob Download] Fehlgeschlagen (Versuch ${retries + 1}/${maxRetries + 1}): ${filename}`);
+                    }
                 } else {
-                    console.error('[Blob Download] Fehlgeschlagen:', filename);
+                    // Für normale URLs verwende die Chrome Download API
+                    success = await new Promise<boolean>((resolve) => {
+                        const message: DownloadMessage = {
+                            action: "download",
+                            url,
+                            filename
+                        };
+
+                        chrome.runtime.sendMessage(message, (response) => {
+                            if (chrome.runtime.lastError) {
+                                console.warn(`[Download] Fehler (Versuch ${retries + 1}/${maxRetries + 1}):`, chrome.runtime.lastError.message);
+                                resolve(false);
+                            } else if (response?.success) {
+                                console.log(`[Download] Erfolgreich angefragt: ${filename}`);
+                                this.downloadedUrls.add(url);
+                                this.downloadStats.totalMedia++;
+                                resolve(true);
+                            } else {
+                                console.warn(`[Download] Fehlgeschlagen (Versuch ${retries + 1}/${maxRetries + 1}):`, response?.error);
+                                resolve(false);
+                            }
+                        });
+                    });
+
+                    if (success) {
+                        return true;
+                    }
                 }
-                return;
+
+                // Wenn fehlgeschlagen und noch Versuche übrig
+                if (!success && retries < maxRetries) {
+                    retries++;
+                    await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.RETRY_DELAY));
+                    continue;
+                }
+
+                // Wenn alle Versuche fehlgeschlagen sind, trotzdem weitermachen
+                console.error('[Download] Alle Versuche fehlgeschlagen, überspringe:', url);
+                return false;
+
+            } catch (error) {
+                console.error(`[Download] Exception (Versuch ${retries + 1}/${maxRetries + 1}):`, error);
+                if (retries < maxRetries) {
+                    retries++;
+                    await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.RETRY_DELAY));
+                } else {
+                    console.error('[Download] Alle Versuche fehlgeschlagen nach Exception, überspringe:', url);
+                    return false;
+                }
             }
-
-            // Für normale URLs verwende die Chrome Download API
-            const message: DownloadMessage = {
-                action: "download",
-                url,
-                filename
-            };
-
-            chrome.runtime.sendMessage(message, (response) => {
-                if (response?.success) {
-                    console.log(`[Download] Erfolgreich angefragt: ${filename}`);
-                    this.downloadStats.totalMedia++;
-                } else {
-                    console.error('[Download] Fehlgeschlagen:', response?.error);
-                }
-            });
-        } catch (error) {
-            console.error('[Download] Fehlgeschlagen:', error);
         }
+
+        return false;
     }
 
     private async downloadCurrentCarouselItem(
@@ -263,14 +310,19 @@ class InstagramDownloader {
         // 1. Bilder im Post
         const imgs = getPostImages(post);
         for (const img of imgs) {
-            if (img.naturalHeight < 400) continue; // kleine Avatare ignorieren
-            if (!seenUrls.has(img.src)) {
-                console.log("[DEBUG] Ein Bild → wird geladen:", img.src);
-                seenUrls.add(img.src);
-                await this.downloadMedia(img.src, seenUrls.size, profileName, postDate, false, false);
-                console.log("[DEBUG] Bild wurde geladen.");
-                foundNew = true;
-                await new Promise(r => setTimeout(r, 300));
+            try {
+                if (img.naturalHeight < DOWNLOAD_CONFIG.MIN_IMAGE_HEIGHT) continue; // kleine Avatare ignorieren
+                if (!seenUrls.has(img.src)) {
+                    console.log("[DEBUG] Ein Bild → wird geladen:", img.src);
+                    seenUrls.add(img.src);
+                    await this.downloadMedia(img.src, seenUrls.size, profileName, postDate, false, false);
+                    console.log("[DEBUG] Bild wurde geladen.");
+                    foundNew = true;
+                    await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.DOWNLOAD_DELAY));
+                }
+            } catch (error) {
+                console.error('[Download] Fehler beim Bild-Download, überspringe:', error);
+                // Weiter mit nächstem Bild
             }
         }
 
@@ -281,42 +333,83 @@ class InstagramDownloader {
         console.log(`[DEBUG] Gefundene Video-Elemente: ${videoElements.length}`);
         
         for (const source of videoSources) {
-            console.log(`[DEBUG] Video-Quelle: ${source.url} (${source.type})`);
-            
-            if (!seenUrls.has(source.url)) {
-                console.log(`[DEBUG] Video-Quelle → wird geladen: ${source.url} (${source.type})`);
-                seenUrls.add(source.url);
+            try {
+                console.log(`[DEBUG] Video-Quelle: ${source.url} (${source.type})`);
                 
-                if (source.type === 'blob') {
-                    // Blob-URL = echtes Video - verwende Fallback-Methoden
-                    console.log("[DEBUG] Starte Video-Download mit Fallback-Methoden...");
+                if (!seenUrls.has(source.url)) {
+                    console.log(`[DEBUG] Video-Quelle → wird geladen: ${source.url} (${source.type})`);
+                    seenUrls.add(source.url);
                     
-                    const timestamp = Date.now();
-                    const formattedDate = this.formatDate(postDate);
-                    const filename = `${profileName}_${timestamp}_${seenUrls.size}_${formattedDate}_video.mp4`;
-                    
-                    // Finde das entsprechende Video-Element
-                    const videoElement = videoElements.find(vid => vid.src === source.url);
-                    
-                    const success = await downloadVideoWithFallback(videoElement || null, source.url, filename);
-                    if (success) {
-                        console.log("[DEBUG] Video wurde erfolgreich geladen.");
-                        this.downloadStats.totalMedia++;
-                        foundNew = true;
+                    if (source.type === 'blob') {
+                        // Blob-URL = echtes Video - verwende Fallback-Methoden
+                        console.log("[DEBUG] Starte Video-Download mit Fallback-Methoden...");
+                        
+                        // Verwende generateUniqueFilename für eindeutige Dateinamen
+                        const filename = generateUniqueFilename(
+                            source.url,
+                            profileName,
+                            postDate,
+                            this.settings,
+                            false,
+                            true
+                        );
+                        
+                        // Prüfe ob bereits heruntergeladen
+                        if (this.downloadedUrls.has(source.url)) {
+                            console.log('[Download] Video-URL bereits heruntergeladen, überspringe:', source.url);
+                            continue;
+                        }
+                        
+                        // Finde das entsprechende Video-Element
+                        const videoElement = videoElements.find(vid => vid.src === source.url);
+                        
+                        // Retry-Mechanismus für Videos
+                        let retries = 0;
+                        let success = false;
+                        while (retries <= DOWNLOAD_CONFIG.MAX_RETRIES && !success) {
+                            try {
+                                success = await downloadVideoWithFallback(videoElement || null, source.url, filename);
+                                if (success) {
+                                    console.log("[DEBUG] Video wurde erfolgreich geladen.");
+                                    this.downloadedUrls.add(source.url);
+                                    this.downloadStats.totalMedia++;
+                                    foundNew = true;
+                                } else {
+                                    console.warn(`[DEBUG] Video-Download fehlgeschlagen (Versuch ${retries + 1}/${DOWNLOAD_CONFIG.MAX_RETRIES + 1}).`);
+                                    retries++;
+                                    if (retries <= DOWNLOAD_CONFIG.MAX_RETRIES) {
+                                        await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.RETRY_DELAY));
+                                    }
+                                }
+                            } catch (error) {
+                                console.error(`[DEBUG] Video-Download Exception (Versuch ${retries + 1}/${DOWNLOAD_CONFIG.MAX_RETRIES + 1}):`, error);
+                                retries++;
+                                if (retries <= DOWNLOAD_CONFIG.MAX_RETRIES) {
+                                    await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.RETRY_DELAY));
+                                }
+                            }
+                        }
+                        
+                        if (!success) {
+                            console.error("[DEBUG] Video-Download nach allen Versuchen fehlgeschlagen, überspringe.");
+                        }
                     } else {
-                        console.error("[DEBUG] Video-Download fehlgeschlagen.");
+                        // CDN-URL = Thumbnail
+                        console.log("[DEBUG] Starte Thumbnail-Download...");
+                        const success = await this.downloadMedia(source.url, seenUrls.size, profileName, postDate, true, false);
+                        if (success) {
+                            console.log("[DEBUG] Video-Thumbnail wurde geladen.");
+                            foundNew = true;
+                        }
                     }
+                    
+                    await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.VIDEO_DELAY)); // Pause für Videos
                 } else {
-                    // CDN-URL = Thumbnail
-                    console.log("[DEBUG] Starte Thumbnail-Download...");
-                    await this.downloadMedia(source.url, seenUrls.size, profileName, postDate, true, false);
-                    console.log("[DEBUG] Video-Thumbnail wurde geladen.");
-                    foundNew = true;
+                    console.log(`[DEBUG] Video-Quelle bereits gesehen: ${source.url}`);
                 }
-                
-                await new Promise(r => setTimeout(r, 500)); // Längere Pause für Videos
-            } else {
-                console.log(`[DEBUG] Video-Quelle bereits gesehen: ${source.url}`);
+            } catch (error) {
+                console.error('[Download] Fehler beim Video-Download, überspringe:', error);
+                // Weiter mit nächstem Video
             }
         }
 
@@ -326,39 +419,58 @@ class InstagramDownloader {
 
     private async downloadSinglePost(post: HTMLElement, control: DownloadControl): Promise<number> {
         const seenUrls = new Set<string>();
-        const profileName = this.getProfileName(post);
-        const postDate = this.getPostDate(post);
+        let profileName = "instagram";
+        let postDate = new Date();
         let noNewCount = 0;
+        
+        try {
+            profileName = this.getProfileName(post);
+            postDate = this.getPostDate(post);
+        } catch (error) {
+            console.error('[Post] Fehler beim Extrahieren von Profilname/Datum, verwende Standardwerte:', error);
+        }
 
         console.log('[Post] Starte Download für:', profileName);
 
-        // Ersten Slide laden
-        await this.downloadCurrentCarouselItem(post, seenUrls, profileName, postDate);
-        await new Promise(r => setTimeout(r, 50));
+        try {
+            // Ersten Slide laden
+            await this.downloadCurrentCarouselItem(post, seenUrls, profileName, postDate);
+            await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.CAROUSEL_DELAY));
 
-        // Durch Carousel iterieren
-        while (!control.shouldStop && noNewCount < 2) {
-            const nextBtn = post.querySelector('button[aria-label="Weiter"]') || 
-                           post.querySelector('button[aria-label="Next"]');
-            
-            if (!nextBtn || (nextBtn as HTMLElement).offsetParent === null) {
-                console.log('[Carousel] Kein Weiter-Button → Ende');
-                break;
+            // Durch Carousel iterieren
+            while (!control.shouldStop && noNewCount < DOWNLOAD_CONFIG.MAX_NO_NEW_COUNT) {
+                try {
+                    const nextBtn = post.querySelector('button[aria-label="Weiter"]') || 
+                                   post.querySelector('button[aria-label="Next"]');
+                    
+                    if (!nextBtn || (nextBtn as HTMLElement).offsetParent === null) {
+                        console.log('[Carousel] Kein Weiter-Button → Ende');
+                        break;
+                    }
+
+                    const sizeBefore = seenUrls.size;
+                    console.log('[Carousel] Klicke Weiter...');
+                    (nextBtn as HTMLElement).click();
+                    await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.CAROUSEL_DELAY));
+
+                    const foundNew = await this.downloadCurrentCarouselItem(post, seenUrls, profileName, postDate);
+                    
+                    if (seenUrls.size === sizeBefore || !foundNew) {
+                        noNewCount++;
+                        console.log(`[Carousel] Keine neuen Medien (${noNewCount}/${DOWNLOAD_CONFIG.MAX_NO_NEW_COUNT})`);
+                    } else {
+                        noNewCount = 0;
+                    }
+                } catch (error) {
+                    console.error('[Carousel] Fehler beim Navigieren, versuche weiter:', error);
+                    noNewCount++;
+                    if (noNewCount >= DOWNLOAD_CONFIG.MAX_NO_NEW_COUNT) {
+                        break;
+                    }
+                }
             }
-
-            const sizeBefore = seenUrls.size;
-            console.log('[Carousel] Klicke Weiter...');
-            (nextBtn as HTMLElement).click();
-            await new Promise(r => setTimeout(r, 150));
-
-            const foundNew = await this.downloadCurrentCarouselItem(post, seenUrls, profileName, postDate);
-            
-            if (seenUrls.size === sizeBefore || !foundNew) {
-                noNewCount++;
-                console.log(`[Carousel] Keine neuen Medien (${noNewCount}/2)`);
-            } else {
-                noNewCount = 0;
-            }
+        } catch (error) {
+            console.error('[Post] Fehler beim Download, versuche trotzdem weiter:', error);
         }
 
         console.log(`[Post] Fertig! ${seenUrls.size} Medien heruntergeladen`);
@@ -368,37 +480,79 @@ class InstagramDownloader {
     private async downloadAllPosts(startPost: HTMLElement, control: DownloadControl): Promise<void> {
         let currentPost = startPost;
         let postCount = 0;
+        let consecutiveErrors = 0;
+        const maxConsecutiveErrors = 5;
+        let noNewPostCount = 0;
+        const maxNoNewPostCount = 10; // Stoppe nach 10 Posts ohne neuen Post
 
-        while (!control.shouldStop && postCount < 50) {
-            if (control.shouldStop) {
-                console.log('[Posts] Download gestoppt');
-                return;
+        // Kein Limit mehr - lade alle Posts bis zum Ende
+        while (!control.shouldStop) {
+            try {
+                if (control.shouldStop) {
+                    console.log('[Posts] Download gestoppt');
+                    return;
+                }
+
+                await this.downloadSinglePost(currentPost, control);
+                postCount++;
+                this.downloadStats.currentPost = postCount;
+                consecutiveErrors = 0; // Reset error counter bei Erfolg
+
+                if (control.shouldStop) return;
+
+                console.log(`[Posts] Post ${postCount} abgeschlossen, springe zum nächsten...`);
+                
+                try {
+                    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+                    await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.CAROUSEL_DELAY));
+
+                    const newPost = document.querySelector('article[role="presentation"]') as HTMLElement;
+                    
+                    if (!newPost) {
+                        console.log('[Posts] Kein weiterer Post gefunden → Ende');
+                        noNewPostCount++;
+                        if (noNewPostCount >= maxNoNewPostCount) {
+                            console.log('[Posts] Zu viele Versuche ohne neuen Post → Ende');
+                            break;
+                        }
+                        await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.CAROUSEL_DELAY));
+                        continue;
+                    }
+
+                    if (newPost === currentPost) {
+                        console.log('[Posts] Gleicher Post wie vorher');
+                        noNewPostCount++;
+                        if (noNewPostCount >= maxNoNewPostCount) {
+                            console.log('[Posts] Zu viele Versuche ohne neuen Post → Ende');
+                            break;
+                        }
+                        await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.CAROUSEL_DELAY));
+                        continue;
+                    }
+
+                    // Neuer Post gefunden - reset counter
+                    noNewPostCount = 0;
+                    currentPost = newPost;
+                } catch (error) {
+                    console.error('[Posts] Fehler beim Navigieren zum nächsten Post:', error);
+                    consecutiveErrors++;
+                    if (consecutiveErrors >= maxConsecutiveErrors) {
+                        console.error('[Posts] Zu viele aufeinanderfolgende Fehler, stoppe Download');
+                        break;
+                    }
+                    // Versuche trotzdem weiter
+                    await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.CAROUSEL_DELAY));
+                }
+            } catch (error) {
+                console.error('[Posts] Fehler beim Download eines Posts, versuche weiter:', error);
+                consecutiveErrors++;
+                if (consecutiveErrors >= maxConsecutiveErrors) {
+                    console.error('[Posts] Zu viele aufeinanderfolgende Fehler, stoppe Download');
+                    break;
+                }
+                // Versuche trotzdem weiter
+                await new Promise(r => setTimeout(r, DOWNLOAD_CONFIG.CAROUSEL_DELAY));
             }
-
-            await this.downloadSinglePost(currentPost, control);
-            postCount++;
-            this.downloadStats.currentPost = postCount;
-
-            if (control.shouldStop) return;
-
-            console.log(`[Posts] Post ${postCount} abgeschlossen, springe zum nächsten...`);
-            
-            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-            await new Promise(r => setTimeout(r, 200));
-
-            const newPost = document.querySelector('article[role="presentation"]') as HTMLElement;
-            
-            if (!newPost) {
-                console.log('[Posts] Kein weiterer Post gefunden → Ende');
-                break;
-            }
-
-            if (newPost === currentPost) {
-                console.log('[Posts] Keine weiteren Posts mehr');
-                break;
-            }
-
-            currentPost = newPost;
         }
 
         this.downloadStats.totalPosts = postCount;

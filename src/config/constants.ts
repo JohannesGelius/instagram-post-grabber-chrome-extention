@@ -11,10 +11,13 @@ export const EXTENSION_CONFIG = {
 export const DOWNLOAD_CONFIG = {
   MAX_POSTS: 50,
   MIN_IMAGE_HEIGHT: 400,
-  DOWNLOAD_DELAY: 300,
-  CAROUSEL_DELAY: 150,
+  DOWNLOAD_DELAY: 50, // Sehr schnell: 50ms zwischen Downloads
+  CAROUSEL_DELAY: 100, // Sehr schnell: 100ms zwischen Carousel-Items
   BUTTON_CHECK_INTERVAL: 200,
-  MAX_NO_NEW_COUNT: 2
+  MAX_NO_NEW_COUNT: 2,
+  VIDEO_DELAY: 150, // Sehr schnell: 150ms für Videos
+  MAX_RETRIES: 2, // Reduziert auf 2 Versuche für schnellere Fehlerbehandlung
+  RETRY_DELAY: 200 // Schneller: 200ms Wartezeit vor Retry
 } as const;
 
 export const UI_CONFIG = {
